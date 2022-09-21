@@ -1,9 +1,8 @@
 class Feature:
-    def __init__(self, name_feature, value_feature, type_domain, start_time, end_time):
+    def __init__(self, times, freqs, start_time, end_time):
         self.id = 0
-        self.name_feature = name_feature
-        self.value_feature = value_feature
-        self.type_domain = type_domain
+        self.time_features = times
+        self.frequency_features = freqs
         self.start_time = start_time
         self.end_time = end_time
         pass
