@@ -5,6 +5,7 @@ import biosppy
 import math
 import numpy as np
 import pyhrv
+import pandas as pd
  
 import models.feature as  mf
 import models.cardiacCoherence as mc
@@ -12,13 +13,14 @@ import models.cardiacCoherence as mc
 
 class Signal2:
     
-    def __init__(self, path, type_signal, sampling, number_segment):
-        self.id = 0
+    def __init__(self, name_signal, path, type_signal, sampling, number_segment):
+        self.name_signal = 0
         self.points_signal = self.get_signal(path)
         self.name_signal = self.get_name_signal(type_signal)
         self.t,self.filtered_signal,self.rr_peaks = self.get_rpeaks(self.points_signal, type_signal, sampling)
-        self.signal_segment = self.segment_signal(self.filtered_signal,sampling,number_segment)
-        self.t_segment = self.segment_time(self.signal_segment,self.t)
+        self.signal_segment, self.t_segment = self.create_windows_signal(self.filtered_signal,self.t,12,500)
+        #self.signal_segment = self.segment_signal(self.filtered_signal,sampling,number_segment)
+        #self.t_segment = self.segment_time(self.signal_segment,self.t)
      
         self.time_line = self.process_signal(self.signal_segment, self.t_segment,type_signal, sampling)
         self.PIns = []
@@ -36,6 +38,11 @@ class Signal2:
                 points_signal.append(float(line.strip()))
         return points_signal
     
+    """
+    Define el nombre la señal según su tipo
+    @param type_signal: tipo de señal
+    @return:            string con nombre de señal
+    """
     def get_name_signal(self, type_signal):
         if(type_signal == 1):
             return "ECG"
@@ -95,7 +102,7 @@ class Signal2:
     @return:        Señal segmentada según la ventana de tiempo
     """
     def segment_signal(self, points_signal , sampling, window):
-        shiftLen=window
+        shiftLen=0.5
         duration=int(window*sampling)
         dataOverlap = (window-shiftLen)*sampling
         numberOfSegments = int(math.ceil((len(points_signal)-dataOverlap)/(duration-dataOverlap)))
@@ -120,8 +127,29 @@ class Signal2:
             t_segment.append(t[count_t: len(segmented_signal[i]) + count_t ])
             count_t = len(segmented_signal[i]) + count_t
         return t_segment
-        
-        
+    """
+    Segmenta la señal según una ventana de tiempo. La ventana se mueve en pequeños segmentos
+    de tiempo y se crea un nuevo arreglo para ser procesado
+    @param signal: señal original
+    @param t:  arreglo de tiempo de la señal original
+    @param windo_size: ventana de tiempo para mover la señal
+    @param shif: largo de tiempo que se mueve la ventana
+    @return: señal segmentada con respectivo tiempo
+    
+    """
+    def create_windows_signal(self, signal, t, window_size, shif):
+        signal_segment = []
+        t_segment = []
+        init_pos = 0
+        final_pos = window_size*1000
+        while final_pos <= len(t):
+            signal_segment.append(signal[int(init_pos):int(final_pos)])
+            t_segment.append(t[int(init_pos):int(final_pos)])
+            init_pos = init_pos + shif
+            final_pos = final_pos + shif
+        return signal_segment,t_segment
+            
+         
     """
     Obtiene la coherencia cardiaca a partirar de los tiempos R-Peaks [ms]
     @param rpeaks:  tiempos R-Peaks [ms]
@@ -163,6 +191,36 @@ class Signal2:
         coherence_ratio = peak_power/(total_power - peak_power)
         return coherence_ratio
     
+    def freqTimeToDataframe(self, time_ecg,freq_ecg):
+        vlf = freq_ecg["fft_abs"][0]
+        lf = freq_ecg["fft_abs"][1]
+        hf = freq_ecg["fft_abs"][2]
+        lf_hf = lf/hf
+        fft_total = freq_ecg["fft_total"]
+        hr_mean = time_ecg["hr_mean"]
+        hr_min = time_ecg["hr_min"]
+        hr_max = time_ecg["hr_max"]
+        sdnn = time_ecg["sdnn"]
+        rmssd = time_ecg["rmssd"]
+        sdsd = time_ecg["sdsd"]
+        pnn50 = time_ecg["pnn50"]
+        
+        freq_df=pd.DataFrame({'vlf': [vlf],
+                                'lf': [lf],
+                                'hf': [hf],
+                                'lf/hf': [lf_hf/hf],
+                                'fft_total': [fft_total]
+                                })
+        time_df=pd.DataFrame({'hr_mean': [hr_mean],
+                                'hr_min': [hr_min],
+                                'hr_max':[hr_max],
+                                'sdnn':[sdnn],
+                                'rmssd':[rmssd],
+                                'sdsd':[sdsd],
+                                'pnn50':[pnn50]
+
+                                })
+        return time_df,time_df
     """
     Procesa la señal calculando las Features, la coherencia cardiaca y las emociones por cada segmento
     @param signal_segment: señal segmentada
@@ -172,13 +230,12 @@ class Signal2:
     @return: línea de tiempo con señal procesada
     """
     def process_signal(self, signal_segment, t_segment, type_signal, sampling):
-        
         time_line = []
+        start_time = 0
         for segment, time in zip(signal_segment,t_segment):
             element_time_line= []
-            start_time = time[0]
             end_time = time[-1]
-            
+            print(end_time)
             # Obteniendo rrpeaks y nni
             t,filtered_signal,rr_peaks = self.get_rpeaks(segment, type_signal, sampling)
             nni = self.get_nni(rr_peaks, t)            
@@ -186,17 +243,19 @@ class Signal2:
             # Obteniendo atributos del dominio de la frecuencia y tiempo de la señal
             time_params = self.get_time_params(rr_peaks,t)
             freq_params = self.get_freq_params(rr_peaks,t)
+            time_df, freq_df = self.freqTimeToDataframe(time_params,freq_params)
             # Calculando la coherencia cardíaca
             ratio_coherence = self.get_cardiac_coherence(nni)
-            
+
             # Creando objetos Feature y CardiacCoherence
-            feature = mf.Feature(time_params,freq_params, start_time, end_time)
+            feature = mf.Feature(time_df,freq_df, start_time, end_time)
             coherence = mc.CardiacCoherence("",ratio_coherence, start_time, end_time)
+            
             
             element_time_line.append(feature)
             element_time_line.append(coherence)
             time_line.append(element_time_line)
-          
+            start_time = end_time
         return time_line
         #feature = models.feature()
         

@@ -14,6 +14,9 @@ class CardiacCoherence:
     
     
     def create_description(self,ratio_coherence):
+        if(ratio_coherence < 0.5):
+            return "Incoherencia cardiaca"
+            
         return ""
     
     def generate_scale(self, ratio_coherence):
