@@ -1,5 +1,5 @@
 from unittest import signals
-import models.signal2 as ms
+import models.signal as ms
 
 class Project:
     def __init__(self, name_project, name_involved, description) :

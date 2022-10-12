@@ -1,43 +1,36 @@
-from queue import Full
-from turtle import window_height
-from typing import List
-import biosppy
-import numpy as np
-import pyhrv
+# -*- coding: utf-8 -*-
+import sys
+import os
+
+from tracemalloc import start
 from pyhrv.hrv import hrv
 import pyhrv.time_domain as td
 import pyhrv.frequency_domain as fd
-import math
-import heartpy as hp
+import biosppy
+
+import pyhrv
+import pandas as pd
+from joblib import load
+from sklearn.svm import SVC
 
 
 
 class Signal:
     
-    def __init__(self, path, sampling):
-        self.points_signal = self.get_signal(path)
-        self.t,self.filtered_signal,self.rpeaks = self.get_rpeaks(self.points_signal,sampling)
-        self.nni = self.get_nni(self.rpeaks, self.t)
-        self.general_hrv = self.get_general_hrv(self.rpeaks,self.t,sampling)
-        
-        # Segmentando señal y tiempo
-        #self.segmented_signal = self.segment_signal(self.filtered_signal, sampling, 0.5)
-        #self.segmented_time  = self.segment_time(self.segmented_signal, self.t)
-        self.segment_nni = self.segment_nni(self.nni, 9)
-
-        #self.process_signal(self.segment_nni )
-       
-        self.time_params = self.get_time_params(self.rpeaks, self.t)
-        self.freq_params = self.get_freq_params(self.rpeaks, self.t)
-        self.cardiac_coherence = self.get_cardiac_coherence(self.nni)
-        
-        self.hrdata = hp.get_data(path)
-        self.working_data, self.measures = hp.process(self.hrdata, 1000.0)
-        hp.plotter(self.working_data, self.measures)
-        self.newworking_data, self.newmeasures = hp.process_segmentwise(self.hrdata, sample_rate=1000.0, segment_width = 14, segment_overlap = 0.25, calc_freq=True, reject_segmentwise=True, report_time=True)
-        
+    def __init__(self, path, points_signal,type_signal, sampling, path_model):
+        self.path_model = path_model
+        self.points_signal = []
+        if(points_signal != []):
+            self.points_signal = points_signal
+        else:
+            self.points_signal = self.get_signal(path)
+        self.name_signal = self.get_name_signal(type_signal)
+        self.t,self.filtered_signal,self.rr_peaks = self.get_rpeaks(self.points_signal, type_signal, sampling)
+        self.signal_segment, self.t_segment = self.create_windows_signal(self.filtered_signal,self.t,12,500)
+        self.time_line = self.process_signal(self.signal_segment, self.t_segment,type_signal, sampling)
+        print(self.time_line)
         pass
-    
+
     """
     Obtiene la señal cardiaca de un archivo
     @param path:    archivo con señal cardiaca
@@ -50,83 +43,41 @@ class Signal:
                 points_signal.append(float(line.strip()))
         return points_signal
     
-    
+    """
+    Define el nombre la señal según su tipo
+    @param type_signal: tipo de señal
+    @return:            string con nombre de señal
+    """
+    def get_name_signal(self, type_signal):
+        if(type_signal == 1):
+            return "ECG"
+        else:
+            return "PPG"
+        
     """
     Obtiene series de R-Peaks usando biosppy
     @param signal:  señal cardiaca
+    @param type_signal: tipo de señal (ECG y PPG)
     @param sampling:frecuencia de muestreo
     @return:        rango de tiempo de la señal, señal filtrada y rpeaks  
     """                
-    def get_rpeaks(self,points_signal, sampling):
-        print(len(points_signal))
-        t, filtered_signal, rpeaks = biosppy.signals.ecg.ecg(points_signal, sampling_rate=sampling, show= False)[:3]
-        return t,filtered_signal,rpeaks
-    
-    
+    def get_rpeaks(self,points_signal, type_signal, sampling):
+        if(type_signal== 1):
+            t, filtered_signal, rpeaks = biosppy.signals.ecg.ecg(points_signal, sampling_rate=sampling, show= False)[:3]
+            return t,filtered_signal,rpeaks
+        if(type_signal == 2):
+            t, filtered_signal, rpeaks = biosppy.signals.ppg.ppg(points_signal, sampling_rate=sampling, show= False)[:3]
+            return t,filtered_signal,rpeaks
+    """
+    Obtiene intervalos nni para el calculo de la coherencia cardíaca
+    @param rpeaks:  valor de los peaks r
+    @param t:       tiempo de la señal
+    @return:        intervalos nni
+    """
     def get_nni(self, rpeaks, t):
         nni = pyhrv.tools.nn_intervals(t[rpeaks])
-        return nni
+        return nni    
     
-    def segment_nni(self, nni, duration):
-        segments, control = pyhrv.utils.segmentation(nni=nni, duration=duration, full=True)    
-        # Print control variable
-        print("Segmentation?", control)
-
-        # Print segments
-        for i, segment in enumerate(segments):
-            print("Segment %i" % i)
-            print(segment)
-        return segments
-    
-    def segment_time(self, segmented_signal, t):
-        count_t = 0
-        t_segment = []
-        for i in range(0, len(segmented_signal)):
-            # Segmentando el tiempo en rangos iguales a los segmentos de la señal
-            t_segment.append(t[count_t: len(segmented_signal[i]) + count_t ])
-            count_t = len(segmented_signal[i]) + count_t
-        return t_segment
-        
-    
-        
-    """
-    Segmenta la señal en un rango de tiempo definido
-    @param points_signal:   Puntos de la señal
-    @param sampling:        Frecuencia de muestreo
-    Qparam window:          Ventana que se desplaza a lo largo de la señal
-    @return:        Señal segmentada según la ventana de tiempo
-    """
-    def segment_signal(self, points_signal , sampling, window):
-        shiftLen=window
-        duration=int(window*sampling)
-        dataOverlap = (window-shiftLen)*sampling
-        numberOfSegments = int(math.ceil((len(points_signal)-dataOverlap)/(duration-dataOverlap)))
-        print(numberOfSegments)
-        #print(data.shape)
-        tempBuf = [points_signal[i:i+duration] for i in range(0,len(points_signal),(duration-int(dataOverlap)))]
-        tempBuf[numberOfSegments-1] = np.pad(tempBuf[numberOfSegments-1],(0,duration-tempBuf[numberOfSegments-1].shape[0]),'constant')
-        tempBuf2 = np.vstack(tempBuf[0:numberOfSegments])
-        
-        return tempBuf2
-    
-    
-    def process_signal(self, segmented_signal):
-        for i in range(0, len(segmented_signal)):
-            cardiac_coherence_segment = self.get_cardiac_coherence(segmented_signal[i])
-        return 1
-        
-        
-
-    """
-    Calcula todos los parametros del HRV
-    @param rpeaks:  tiempos R-Peaks [ms]
-    @param t:       tiempo de muestreo de la señal
-    @param sampling:frecuencia de muestreo de la señal
-    @return:        todos los parametros del hrv
-    """         
-    def get_general_hrv(self,rpeaks, t, sampling):
-        rpeaks_results = hrv(rpeaks=t[rpeaks], sampling_rate=sampling, show=False)
-        return rpeaks_results
     
     """
     Calcula los parametros en el tiempo de la señal
@@ -135,7 +86,7 @@ class Signal:
     @return:        parametros en el tiempo de la señal
     """      
     def get_time_params(self, rpeaks, t):
-        time_params = td.time_domain(rpeaks=t[rpeaks])
+        time_params = td.time_domain(rpeaks=t[rpeaks], show=False)
         return time_params
         
     """
@@ -148,6 +99,31 @@ class Signal:
         freq_params = fd.welch_psd(rpeaks=t[rpeaks], show= False)
         return freq_params
 
+
+            
+    """
+    Segmenta la señal según una ventana de tiempo. La ventana se mueve en pequeños segmentos
+    de tiempo y se crea un nuevo arreglo para ser procesado
+    @param signal: señal original
+    @param t:  arreglo de tiempo de la señal original
+    @param windo_size: ventana de tiempo para mover la señal
+    @param shif: largo de tiempo que se mueve la ventana
+    @return: señal segmentada con respectivo tiempo
+    
+    """
+    def create_windows_signal(self, signal, t, window_size, shif):
+        signal_segment = []
+        t_segment = []
+        init_pos = 0
+        final_pos = window_size*1000
+        while final_pos <= len(t):
+            signal_segment.append(signal[int(init_pos):int(final_pos)])
+            t_segment.append(t[int(init_pos):int(final_pos)])
+            init_pos = init_pos + shif
+            final_pos = final_pos + shif
+        return signal_segment,t_segment
+            
+         
     """
     Obtiene la coherencia cardiaca a partirar de los tiempos R-Peaks [ms]
     @param rpeaks:  tiempos R-Peaks [ms]
@@ -187,12 +163,107 @@ class Signal:
         peak_power = coherence_freq_params["fft_abs"][2] # Se obtiene el peak power del lf (rango evaluado)
         total_power = coherence_freq_params["fft_total"] # Potencia de toda la señal
         coherence_ratio = peak_power/(total_power - peak_power)
-        print(coherence_ratio)
         return coherence_ratio
     
-   
+    def freqTimeToDataframe(self, time_ecg,freq_ecg):
+        vlf = freq_ecg["fft_abs"][0]
+        lf = freq_ecg["fft_abs"][1]
+        hf = freq_ecg["fft_abs"][2]
+        lf_hf = lf/hf
+        fft_total = freq_ecg["fft_total"]
+        hr_mean = time_ecg["hr_mean"]
+        hr_min = time_ecg["hr_min"]
+        hr_max = time_ecg["hr_max"]
+        sdnn = time_ecg["sdnn"]
+        rmssd = time_ecg["rmssd"]
+        sdsd = time_ecg["sdsd"]
+        pnn50 = time_ecg["pnn50"]
         
-    def show_heart_coherence(self, coherence_ratio):
-            if(coherence_ratio <= 0.5):
-                return 1,"Incoherencia"
+        freq_df= [{'vlf': [vlf],
+                                'lf': [lf],
+                                'hf': [hf],
+                                'lf/hf': [lf_hf/hf],
+                                'fft_total': [fft_total]
+                                }]
+        time_df= [{'hr_mean': [hr_mean],
+                                'hr_min': [hr_min],
+                                'hr_max':[hr_max],
+                                'sdnn':[sdnn],
+                                'rmssd':[rmssd],
+                                'sdsd':[sdsd],
+                                'pnn50':[pnn50]
+
+                                }]
+        return time_df,freq_df
+    
+    """
+    Obtiene modelo entrenado anteriormente
+    @param path:    ruta del modelo
+    @return:        modelo 
+    """
+    def read_model_prediction(self,path):
+        model = load(path)
+        return model
+    
+    
+    """
+    Predice la emoción según las características de entrada
+    @param model:   modelo de predicción
+    @param features:características del HRV para predecir emoción
+    @return:        valor de la predicción 
+    """
+    def predict_emotion(self,model,features):
+        prediction = model.predict(features)
+        return prediction[0]
+    
+    """
+    Procesa la señal calculando las Features, la coherencia cardiaca y las emociones por cada segmento
+    @param signal_segment: señal segmentada
+    @param t_segment: tiempo segmentado según señal
+    @param type_signal: tipo de señal (1: ECG, 2:PPG)
+    @param sampling: frecuencia de muestreo
+    @return: línea de tiempo con señal procesada
+    """
+    def process_signal(self, signal_segment, t_segment, type_signal, sampling):
+        time_line = []
+        start_time = 0
+        for segment, time in zip(signal_segment,t_segment):
+            element_time_line= []
+            end_time = time[-1]
+    
+            # Obteniendo rrpeaks y nni
+            t,filtered_signal,rr_peaks = self.get_rpeaks(segment, type_signal, sampling)
+            nni = self.get_nni(rr_peaks, t)            
+           
+            # Obteniendo atributos del dominio de la frecuencia y tiempo de la señal
+            time_params = self.get_time_params(rr_peaks,t)
+            freq_params = self.get_freq_params(rr_peaks,t)
+            time_df, freq_df = self.freqTimeToDataframe(time_params,freq_params)
+            # Calculando la coherencia cardíaca
+            ratio_coherence = self.get_cardiac_coherence(nni)
+            #Obteniendo emoción
+            features = [[freq_params["fft_abs"][0], freq_params["fft_abs"][1], freq_params["fft_abs"][2], freq_params["fft_abs"][1]/freq_params["fft_abs"][2], 
+                        freq_params["fft_total"], time_params["hr_mean"], time_params["hr_min"], time_params["hr_max"] , time_params["sdnn"]]]
+            model = self.read_model_prediction(self.path_model)
+            emotion = self.predict_emotion(model, features)
+
+
+            # Creando objetos Feature y 
             
+            element = {"time_df": time_df,
+                        "freq_df": freq_df,
+                        "ratio_coherence": ratio_coherence,
+                        "emotion": emotion,
+                        "start_time": start_time,
+                        "end_time": end_time}
+            #feature = mf.Feature(time_df,freq_df, start_time, end_time)
+            #coherence = mc.CardiacCoherence("",ratio_coherence, start_time, end_time)
+            
+            time_line.append(element)
+            start_time = end_time
+        return time_line
+        #feature = models.feature()
+        
+
+
+
