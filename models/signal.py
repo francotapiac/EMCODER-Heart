@@ -25,10 +25,9 @@ class Signal:
         else:
             self.points_signal = self.get_signal(path)
         self.name_signal = self.get_name_signal(type_signal)
-        self.t,self.filtered_signal,self.rr_peaks = self.get_rpeaks(self.points_signal, type_signal, sampling)
+        self.t,self.filtered_signal,self.rr_peaks, self.templates_ts, self.templates, self.heart_rate_ts, self.heart_rate = self.get_rpeaks(self.points_signal, type_signal, sampling)
         self.signal_segment, self.t_segment = self.create_windows_signal(self.filtered_signal,self.t,12,500)
         self.time_line = self.process_signal(self.signal_segment, self.t_segment,type_signal, sampling)
-        print(self.time_line)
         pass
 
     """
@@ -63,8 +62,8 @@ class Signal:
     """                
     def get_rpeaks(self,points_signal, type_signal, sampling):
         if(type_signal== 1):
-            t, filtered_signal, rpeaks = biosppy.signals.ecg.ecg(points_signal, sampling_rate=sampling, show= False)[:3]
-            return t,filtered_signal,rpeaks
+            t, filtered_signal, rpeaks,templates_ts,templates,heart_rate_ts,heart_rate  = biosppy.signals.ecg.ecg(points_signal, sampling_rate=sampling, show= False)[:7]
+            return  t, filtered_signal, rpeaks,templates_ts,templates,heart_rate_ts,heart_rate
         if(type_signal == 2):
             t, filtered_signal, rpeaks = biosppy.signals.ppg.ppg(points_signal, sampling_rate=sampling, show= False)[:3]
             return t,filtered_signal,rpeaks
@@ -182,7 +181,7 @@ class Signal:
         freq_df= [{'vlf': [vlf],
                                 'lf': [lf],
                                 'hf': [hf],
-                                'lf/hf': [lf_hf/hf],
+                                'lf-hf': [lf_hf/hf],
                                 'fft_total': [fft_total]
                                 }]
         time_df= [{'hr_mean': [hr_mean],
@@ -232,7 +231,7 @@ class Signal:
             end_time = time[-1]
     
             # Obteniendo rrpeaks y nni
-            t,filtered_signal,rr_peaks = self.get_rpeaks(segment, type_signal, sampling)
+            t,filtered_signal,rr_peaks = self.get_rpeaks(segment, type_signal, sampling)[:3]
             nni = self.get_nni(rr_peaks, t)            
            
             # Obteniendo atributos del dominio de la frecuencia y tiempo de la señal
