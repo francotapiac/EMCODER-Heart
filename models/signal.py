@@ -7,7 +7,9 @@ from pyhrv.hrv import hrv
 import pyhrv.time_domain as td
 import pyhrv.frequency_domain as fd
 import biosppy
-
+import matplotlib
+matplotlib.use('TkAgg')
+matplotlib.use('Agg')
 import pyhrv
 import pandas as pd
 from joblib import load
@@ -17,7 +19,7 @@ from sklearn.svm import SVC
 
 class Signal:
     
-    def __init__(self, path, points_signal,type_signal, sampling, path_model):
+    def __init__(self, path, points_signal,type_signal, sampling, window, shif, path_model):
         self.path_model = path_model
         self.points_signal = []
         if(points_signal != []):
@@ -26,7 +28,7 @@ class Signal:
             self.points_signal = self.get_signal(path)
         self.name_signal = self.get_name_signal(type_signal)
         self.t,self.filtered_signal,self.rr_peaks, self.templates_ts, self.templates, self.heart_rate_ts, self.heart_rate = self.get_rpeaks(self.points_signal, type_signal, sampling)
-        self.signal_segment, self.t_segment = self.create_windows_signal(self.filtered_signal,self.t,12,500)
+        self.signal_segment, self.t_segment = self.create_windows_signal(self.filtered_signal,self.t,window, shif)
         self.time_line = self.process_signal(self.signal_segment, self.t_segment,type_signal, sampling)
         pass
 
@@ -114,7 +116,10 @@ class Signal:
         signal_segment = []
         t_segment = []
         init_pos = 0
-        final_pos = window_size*1000
+        final_pos = window_size
+        shif = shif
+        print(final_pos)
+        print(len(t))
         while final_pos <= len(t):
             signal_segment.append(signal[int(init_pos):int(final_pos)])
             t_segment.append(t[int(init_pos):int(final_pos)])
@@ -129,7 +134,7 @@ class Signal:
     @param t:       tiempo de muestreo de la señal
     @return:        valor de la coherencia cardiaca 
     """   
-    def get_cardiac_coherence(self, nni):
+    def get_cardiac_coherence(self, nni, freq_params):
         
         # Crea un rango auxiliar de frecuencias según la documentación
         # La coherencia cardiaca se evalua en el rango 0.04 al 0.26
@@ -156,8 +161,11 @@ class Signal:
         
         # Se obtiene la potencia correspondiente al peak evaluado sobre la ventana (lf en este caso, debido a que la función no permite cambiar el nombre)
         fbands_coherence = {'ulf': (0.0, 0.01),'vlf': (0.01, low_window), 'lf': (low_window, upper_window), 'hf': (upper_window, 0.4)}
-        coherence_freq_params = fd.welch_psd(nni = nni, show= False,fbands=fbands_coherence)
-        
+        try:
+            coherence_freq_params = fd.welch_psd(nni = nni, show= False,fbands=fbands_coherence, nfft=2**16)
+        except:
+            return freq_params["fft_abs"][1]/(freq_params["fft_abs"][0] + freq_params["fft_abs"][2])
+
         # Se implementa la ecuación: Ratio coherence = Peak power/ (Total power - Peak power)
         peak_power = coherence_freq_params["fft_abs"][2] # Se obtiene el peak power del lf (rango evaluado)
         total_power = coherence_freq_params["fft_total"] # Potencia de toda la señal
@@ -239,7 +247,7 @@ class Signal:
             freq_params = self.get_freq_params(rr_peaks,t)
             time_df, freq_df = self.freqTimeToDataframe(time_params,freq_params)
             # Calculando la coherencia cardíaca
-            ratio_coherence = self.get_cardiac_coherence(nni)
+            ratio_coherence = self.get_cardiac_coherence(nni, freq_params)
             #Obteniendo emoción
             features = [[freq_params["fft_abs"][0], freq_params["fft_abs"][1], freq_params["fft_abs"][2], freq_params["fft_abs"][1]/freq_params["fft_abs"][2], 
                         freq_params["fft_total"], time_params["hr_mean"], time_params["hr_min"], time_params["hr_max"] , time_params["sdnn"]]]
@@ -257,7 +265,8 @@ class Signal:
                         "end_time": end_time}
             #feature = mf.Feature(time_df,freq_df, start_time, end_time)
             #coherence = mc.CardiacCoherence("",ratio_coherence, start_time, end_time)
-            
+            print(time_df)
+            print(freq_df)
             time_line.append(element)
             start_time = end_time
         return time_line

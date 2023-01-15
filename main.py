@@ -4,12 +4,8 @@ import models.signal as signal
 app = Flask(__name__)
 @app.route("/")
 def get_time_line_signal():
-    data = signal.Signal("test.txt",[], 1, 1000, "svc.joblib")
-    time_line = data.time_line
-    time_line.append({"points_signal": data.filtered_signal.tolist()})
-    time_line.append({"times": data.t.tolist()})
-    time_line = json.dumps(time_line)
-    return time_line
+    print("Conectando API")
+    return json.dumps({"data": "conectado"})
 
 @app.route("/template")
 def get_time_line_template():
@@ -20,12 +16,16 @@ def get_time_line_template():
     time_line = json.dumps(time_line)
     return time_line
 
-@app.route("/heart")
-def get_time_line_heart():
-    data = signal.Signal("test.txt",[], 1, 1000, "svc.joblib")
+@app.route("/heart/<path>/<sample>/<window>/<shif>")
+def get_time_line_heart(path, sample, window, shif):
+    print(shif)
+    data = signal.Signal(path,[], 1, float(sample), int(window), int(shif), "svc.joblib")
     time_line = data.time_line
-    time_line.append({"points_signal": data.heart_rate.tolist()})
-    time_line.append({"times": data.heart_rate_ts.tolist()})
+    time_line.append({"fci": data.heart_rate.tolist()})
+    time_line.append({"times_fci": data.heart_rate_ts.tolist()})
+    time_line.append({"rr":data.rr_peaks.tolist()})
+    time_line.append({"signal":data.filtered_signal.tolist()})
+    time_line.append({"time_signal":data.t.tolist()})
 
     time_line = json.dumps(time_line)
 
