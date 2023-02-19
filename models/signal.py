@@ -8,7 +8,7 @@ import pyhrv.time_domain as td
 import pyhrv.frequency_domain as fd
 import biosppy
 import matplotlib
-matplotlib.use('TkAgg')
+#matplotlib.use('TkAgg')
 matplotlib.use('Agg')
 import pyhrv
 import pandas as pd
