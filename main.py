@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, json
+from flask import Flask, jsonify, json, request
 import models.signal as signal
 
 app = Flask(__name__)
@@ -30,7 +30,36 @@ def get_time_line_heart(path, sample, window, shif):
     time_line = json.dumps(time_line)
 
     return time_line
-        
+
+@app.route("/process",  methods=['POST'])
+def processSignal():
+    content = json.loads(request.data)
+    path = content["file"]
+    print(path)
+    sample = content["sample"]
+    window = content["window"]
+    shif = content["shif"]
+
+    data = signal.Signal(path,[], 1, float(sample), int(window), int(shif), "svc.joblib")
+    time_line = data.time_line
+    time_line.append({"fci": data.heart_rate.tolist()})
+    time_line.append({"times_fci": data.heart_rate_ts.tolist()})
+    time_line.append({"rr":data.rr_peaks.tolist()})
+    time_line.append({"signal":data.filtered_signal.tolist()})
+    time_line.append({"time_signal":data.t.tolist()})
+
+    time_line = json.dumps(time_line)
+
+    return time_line
+
+@app.route('/post_json', methods=['POST'])
+def process_json():
+    info = json.loads(request.data)
+    print(info["nombre"])
+    resp = jsonify({'message' : 'Files successfully uploaded'})
+    resp.status_code = 201
+    return resp
+
 @app.route("/<points>/<type_signal>/<sample>")
 def get_time_line_points(points, type_signal, sample):
     data = signal.Signal("",points, type_signal, sample, "svc.joblib")
